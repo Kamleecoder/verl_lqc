@@ -14,6 +14,7 @@
 
 import torch
 import os
+import asyncio
 import pytest
 import ray
 from omegaconf import DictConfig, OmegaConf
@@ -353,4 +354,4 @@ if __name__ == "__main__":
     test_hf_value_models()
     test_attn_implementation_override()
     test_fsdp_worker_attn_implementation_integration()
-    test_load_format()
+    asyncio.run(test_load_format())
