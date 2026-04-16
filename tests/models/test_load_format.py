@@ -1,6 +1,5 @@
 import os
 import torch
-import torch.nn as nn
 from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig
 from verl.utils.device import get_device_name
 
@@ -12,6 +11,7 @@ def _compare_state_dicts(state_dict1: dict, state_dict2: dict, atol: float = 1e-
         return False
 
     all_close = True
+    mismatch_count = 0
     for key in state_dict1.keys():
         tensor1 = state_dict1[key]
         tensor2 = state_dict2[key]
@@ -23,8 +23,13 @@ def _compare_state_dicts(state_dict1: dict, state_dict2: dict, atol: float = 1e-
         
         if not torch.allclose(tensor1, tensor2, atol=atol, rtol=rtol):
             max_diff = torch.max(torch.abs(tensor1 - tensor2)).item()
-            print(f"[ERROR] Value mismatch for {key}, max diff: {max_diff:.10f}")
+            if mismatch_count < 5:  # 只打印前5个不匹配的
+                print(f"[ERROR] Value mismatch for {key}, max diff: {max_diff:.10f}")
+            mismatch_count += 1
             all_close = False
+
+    if mismatch_count > 0:
+        print(f"[INFO]   总共有 {mismatch_count} 个张量不匹配")
 
     return all_close
 
@@ -63,55 +68,45 @@ def _load_model(model_path: str, load_format: str, device: str):
     return model, model.state_dict()
 
 
-def _do_actual_forward_update(model, tokenizer, device: str):
+def _do_forward_update(model, tokenizer, device: str, model_name: str):
     """
-    【核心】实际的模型前向更新：
-    1. 准备输入
-    2. 前向传播
-    3. 计算简单的 loss
-    4. 模拟一次参数更新（用简单的 SGD）
+    对指定模型执行前向更新
     """
-    print(f"\n[INFO] ========== 执行实际的模型前向更新 ==========")
+    print(f"\n[INFO] ========== 对 {model_name} 执行前向更新 ==========")
     
     model.train()
     
-    # 1. 准备输入
-    print(f"[INFO]   步骤 1: 准备输入数据")
+    # 准备输入
     prompt = "你好，请介绍一下你自己。"
     inputs = tokenizer(prompt, return_tensors="pt").to(device)
     
-    # 2. 前向传播
-    print(f"[INFO]   步骤 2: 前向传播")
+    # 前向传播
     with torch.cuda.amp.autocast(dtype=torch.bfloat16):
         outputs = model(**inputs, labels=inputs["input_ids"])
     
     loss = outputs.loss
-    logits = outputs.logits
-    print(f"[INFO]   前向传播完成，Loss: {loss.item():.4f}")
-    print(f"[INFO]   Logits shape: {logits.shape}")
+    print(f"[INFO]   前向传播完成，Loss: {loss.item():.6f}")
     
-    # 3. 模拟一次简单的参数更新（SGD）
-    print(f"[INFO]   步骤 3: 模拟一次参数更新 (SGD)")
+    # 反向传播 + 参数更新
     optimizer = torch.optim.SGD(model.parameters(), lr=1e-5)
-    
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
     
     print(f"[INFO]   参数更新完成！")
-    print(f"[INFO] ========== 实际模型前向更新结束 ==========")
+    print(f"[INFO] ========== {model_name} 前向更新结束 ==========")
     
     return model.state_dict()
 
 
-def test_qwen25_load_format_with_actual_update():
+def test_two_different_starting_points_separate_update():
     """
-    主测试：
-    1. load_format=auto 加载真实权重
-    2. 【核心】对 auto 模型做实际的前向传播和参数更新
-    3. load_format=dummy 随机初始化
-    4. 将更新后的 auto 权重同步给 dummy
-    5. 验证两者完全一致
+    按你要求的测试：
+    1. Model A: load_format=auto（真实权重，起点1）
+    2. Model B: load_format=dummy（随机初始化，起点2）
+    3. 不使用 load_state_dict 同步初始权重
+    4. 对两个模型分别做前向更新
+    5. 对比更新后的权重
     """
     # ================= 0. 环境准备 =================
     model_path = os.environ.get("QWEN_MODEL_PATH", "/path/to/your/Qwen2.5-7B-Instruct")
@@ -124,66 +119,66 @@ def test_qwen25_load_format_with_actual_update():
     device = get_device_name()
     print(f"[INFO] 检测到设备: {device}")
     print(f"[INFO] 模型路径: {model_path}")
+    print(f"\n" + "="*80)
+    print(f"[INFO] 测试设置：")
+    print(f"[INFO]   Model A: load_format=auto（真实权重，起点1）")
+    print(f"[INFO]   Model B: load_format=dummy（随机初始化，起点2）")
+    print(f"[INFO]   不使用 load_state_dict 同步初始权重")
+    print(f"[INFO]   对两个模型分别做前向更新")
+    print(f"[INFO]   对比更新后的权重")
+    print(f"="*80)
 
     # ================= 1. 加载 Tokenizer =================
     print("\n[1/6] 加载 Tokenizer...")
     tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
 
-    # ================= 2. 加载 load_format=auto =================
-    print("\n[2/6] 加载源模型 (load_format=auto)...")
-    model_auto, state_dict_auto_initial = _load_model(model_path, "auto", device)
-    print(f"[INFO]   参数量: {sum(p.numel() for p in model_auto.parameters())/1e9:.2f}B")
+    # ================= 2. 加载 Model A (load_format=auto) =================
+    print("\n[2/6] 加载 Model A (load_format=auto)...")
+    model_a, state_dict_a_initial = _load_model(model_path, "auto", device)
+    print(f"[INFO]   Model A 参数量: {sum(p.numel() for p in model_a.parameters())/1e9:.2f}B")
 
-    # ================= 3. 【核心】实际的模型前向更新 =================
-    print("\n[3/6] 对 auto 模型执行实际的前向更新...")
-    state_dict_auto_updated = _do_actual_forward_update(model_auto, tokenizer, device)
+    # ================= 3. 加载 Model B (load_format=dummy) =================
+    print("\n[3/6] 加载 Model B (load_format=dummy)...")
+    model_b, state_dict_b_initial = _load_model(model_path, "dummy", device)
+    print(f"[INFO]   Model B 参数量: {sum(p.numel() for p in model_b.parameters())/1e9:.2f}B")
 
-    # 验证：更新前后权重确实变了
-    print("\n[INFO] 验证：auto 模型更新前后权重变化...")
-    auto_changed = not _compare_state_dicts(state_dict_auto_initial, state_dict_auto_updated)
-    if auto_changed:
-        print("[INFO] ✅ auto 模型权重确实发生了变化（前向更新生效）")
-    else:
-        print("[WARNING] ⚠️ auto 模型权重没有变化（可能是 lr 太小）")
-
-    # ================= 4. 加载 load_format=dummy =================
-    print("\n[4/6] 加载目标模型 (load_format=dummy)...")
-    model_dummy, state_dict_dummy_initial = _load_model(model_path, "dummy", device)
-    print(f"[INFO]   参数量: {sum(p.numel() for p in model_dummy.parameters())/1e9:.2f}B")
-
-    # ================= 5. 验证初始权重不同 =================
-    print("\n[5/6] 验证初始权重差异...")
-    initial_match = _compare_state_dicts(state_dict_auto_updated, state_dict_dummy_initial)
+    # ================= 4. 验证初始权重不同 =================
+    print("\n[4/6] 验证初始状态...")
+    initial_match = _compare_state_dicts(state_dict_a_initial, state_dict_b_initial)
     if initial_match:
-        print("[WARNING] ⚠️ 初始权重居然一致！")
+        print("[WARNING] ⚠️ Model A 和 B 初始权重居然一致！")
     else:
-        print("[INFO] ✅ 初始权重不同，符合预期")
+        print("[INFO] ✅ Model A (auto) 和 B (dummy) 初始权重不同，符合预期")
 
-    # ================= 6. 模拟 verl update_weights 并验证 =================
-    print("\n[6/6] 模拟 verl update_weights 并验证...")
-    print(f"[INFO] 将更新后的 auto 权重同步给 dummy...")
-    model_dummy.load_state_dict(state_dict_auto_updated)
-    state_dict_dummy_updated = model_dummy.state_dict()
-
-    final_match = _compare_state_dicts(state_dict_auto_updated, state_dict_dummy_updated)
+    # ================= 5. 对两个模型分别做前向更新 =================
+    print("\n[5/6] 对两个模型分别做前向更新...")
     
+    state_dict_a_updated = _do_forward_update(model_a, tokenizer, device, "Model A (auto)")
+    state_dict_b_updated = _do_forward_update(model_b, tokenizer, device, "Model B (dummy)")
+
+    # ================= 6. 对比更新后的权重 =================
+    print("\n[6/6] 最终对比：两个模型更新后的权重...")
+    print("\n" + "="*80)
+    print("[INFO] 预期说明：")
+    print("[INFO]   因为 Model A 和 B 的初始权重完全不同（一个真实权重，一个随机初始化），")
+    print("[INFO]   即使做完全相同的前向更新，最终的权重也肯定不同。")
+    print("[INFO]   这是正常的、预期的结果。")
+    print("="*80)
+    
+    final_match = _compare_state_dicts(state_dict_a_updated, state_dict_b_updated)
+    
+    print("\n" + "="*80)
     if final_match:
-        print("\n" + "🎉"*15)
-        print("[INFO] ✅ 测试通过！")
-        print("[INFO] ✅ 完整流程验证：")
-        print("[INFO] ✅   1. load_format=auto 加载真实权重")
-        print("[INFO] ✅   2. 【核心】对 auto 模型做了实际的前向传播和参数更新")
-        print("[INFO] ✅   3. load_format=dummy 随机初始化")
-        print("[INFO] ✅   4. 模拟 verl update_weights 后两者完全一致")
-        print("🎉"*15 + "\n")
+        print("[INFO] ⚠️  意外：更新后的权重居然完全一致！")
+        print("[INFO] ⚠️  这不符合预期（因为初始权重不同）")
     else:
-        print("\n" + "❌"*15)
-        print("[ERROR] ❌ 测试失败！")
-        print("❌"*15 + "\n")
-        raise AssertionError("Weight mismatch")
+        print("[INFO] ✅ 结果符合预期：")
+        print("[INFO] ✅   Model A (auto) 和 Model B (dummy)")
+        print("[INFO] ✅   因为初始起点不同，更新后的权重也不同")
+    print("="*80 + "\n")
 
     # 清理
-    del model_auto, model_dummy
+    del model_a, model_b
     if device == "cuda":
         torch.cuda.empty_cache()
     elif device == "npu":
@@ -191,4 +186,4 @@ def test_qwen25_load_format_with_actual_update():
 
 
 if __name__ == "__main__":
-    test_qwen25_load_format_with_actual_update()
+    test_two_different_starting_points_separate_update()
