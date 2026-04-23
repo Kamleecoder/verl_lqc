@@ -1,3 +1,5 @@
+import asyncio
+import gc
 import os
 from pathlib import Path
 from uuid import uuid4
@@ -5,10 +7,12 @@ from uuid import uuid4
 import pytest
 import ray
 from omegaconf import OmegaConf
-from transformers import AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from verl.utils.device import is_support_ipc
 from verl.utils.tokenizer import normalize_token_ids
 from verl.workers.rollout.replica import RolloutMode, TokenOutput
+from verl.workers.rollout.vllm_rollout.bucketed_weight_transfer import BucketedWeightSender
 from verl.workers.rollout.vllm_rollout.vllm_async_server import vLLMHttpServer
 
 MODEL_PATH = Path(os.path.expanduser(os.environ.get("VERL_TEST_VLLM_MODEL_PATH", "~/models/Qwen/Qwen2.5-0.5B-Instruct")))
@@ -113,7 +117,7 @@ def _generate_text(server, prompt: str, tag: str) -> str:
     output = ray.get(
         server.generate.remote(
             prompt_ids=prompt_ids,
-            sampling_params={"max_tokens": 96, "temperature": 0.7, "top_p": 0.9},
+            sampling_params={"max_tokens": 96, "temperature": 0.0, "top_p": 1.0, "top_k": -1},
             request_id=f"test_{tag}_{uuid4().hex[:8]}",
         ),
         timeout=300,
@@ -130,6 +134,35 @@ def _stop_server(server):
         ray.kill(server)
 
 
+def _iter_reference_weights():
+    model = AutoModelForCausalLM.from_pretrained(
+        str(MODEL_PATH),
+        trust_remote_code=True,
+        torch_dtype="auto",
+    )
+    try:
+        for name, tensor in model.state_dict().items():
+            yield name, tensor
+    finally:
+        del model
+        gc.collect()
+
+
+def _real_update_dummy_server_weights(server):
+    zmq_handle = ray.get(server.collective_rpc.remote("_get_zmq_handle"))
+    update_ref = server.collective_rpc.remote(
+        "update_weights_from_ipc",
+        kwargs={"use_shm": not is_support_ipc()},
+    )
+    sender = BucketedWeightSender(
+        zmq_handle=zmq_handle,
+        bucket_size_mb=512,
+        use_shm=not is_support_ipc(),
+    )
+    asyncio.run(sender.async_send_weights(_iter_reference_weights()))
+    ray.get(update_ref, timeout=1800)
+
+
 def test_compare_dummy_update_and_auto_outputs_same_prompt():
     if not MODEL_PATH.exists():
         pytest.skip(f"Model path does not exist: {MODEL_PATH}")
@@ -141,7 +174,8 @@ def test_compare_dummy_update_and_auto_outputs_same_prompt():
     auto_text = ""
     try:
         dummy_server = _start_server(load_format="dummy", force_dummy_after_init=True)
-        # Simulate "after update_weights" state marker for comparison output.
+        # Do real base-weight sync to make dummy comparable with auto.
+        _real_update_dummy_server_weights(dummy_server)
         ray.get(dummy_server.set_global_steps.remote(1))
         dummy_text = _generate_text(dummy_server, prompt, "dummy_update")
 
