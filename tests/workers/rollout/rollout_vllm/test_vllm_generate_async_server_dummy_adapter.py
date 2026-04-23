@@ -41,13 +41,18 @@ MODEL_PATH = Path(os.path.expanduser(os.environ.get("VERL_TEST_VLLM_MODEL_PATH",
 
 
 class DummyLoadFormatVLLMHttpServer(vLLMHttpServer):
-    """Test-only server 1variant that222 keeps load_format='dummy' in standalone mode.1"""
+    """Test-only server variant that keeps load_format='dummy' in standalone mode."""
 
     def __init__(self, *args, **kwargs):
         requested_load_format = kwargs["config"].get("load_format")
         super().__init__(*args, **kwargs)
         if requested_load_format == "dummy":
             self.config.load_format = "dummy"
+
+    async def launch_server(self, *args, **kwargs):
+        # Keep an explicit coroutine method on this subclass so Ray recognizes
+        # it as an async actor when max_concurrency is set.
+        return await super().launch_server(*args, **kwargs)
 
 
 class AdapterAwareServerAdapter(vLLMServerAdapter):
