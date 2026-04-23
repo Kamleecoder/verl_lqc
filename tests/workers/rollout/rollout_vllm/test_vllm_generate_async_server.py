@@ -45,6 +45,11 @@ def _tokenize_prompt(text: str) -> list[int]:
     return token_ids
 
 
+def _decode_tokens(token_ids: list[int]) -> str:
+    tokenizer = AutoTokenizer.from_pretrained(str(MODEL_PATH), trust_remote_code=True)
+    return tokenizer.decode(token_ids, skip_special_tokens=True)
+
+
 @pytest.fixture
 def init_server():
     if not MODEL_PATH.exists():
@@ -195,6 +200,26 @@ def test_generate_concurrent(init_server):
         assert isinstance(out, TokenOutput)
         assert len(out.token_ids) > 0
         assert out.stop_reason in ("completed", "aborted", None)
+
+
+def test_generate_with_auto_load_format_same_prompt_print_output(init_server):
+    server = init_server
+    prompt = "写一段关于昇腾的介绍"
+    prompt_ids = _tokenize_prompt(prompt)
+
+    output = ray.get(
+        server.generate.remote(
+            prompt_ids=prompt_ids,
+            sampling_params={"max_tokens": 96, "temperature": 0.7, "top_p": 0.9},
+            request_id=f"test_auto_cn_{uuid4().hex[:8]}",
+        ),
+        timeout=300,
+    )
+    assert isinstance(output, TokenOutput)
+    assert len(output.token_ids) > 0
+    text = _decode_tokens(output.token_ids)
+    print(f"\n[Prompt] {prompt}\n[Generated][auto] {text}\n")
+    assert text.strip() != ""
 
 
 if __name__ == "__main__":
