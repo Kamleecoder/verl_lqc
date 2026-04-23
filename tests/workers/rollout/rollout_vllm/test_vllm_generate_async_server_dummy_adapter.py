@@ -41,7 +41,7 @@ MODEL_PATH = Path(os.path.expanduser(os.environ.get("VERL_TEST_VLLM_MODEL_PATH",
 
 
 class DummyLoadFormatVLLMHttpServer(vLLMHttpServer):
-    """Test-only server variant that keeps load_format='dummy' in standalone mode."""
+    """Test-only server variant that keeps load_format='dummy' in standalone mode.1"""
 
     def __init__(self, *args, **kwargs):
         requested_load_format = kwargs["config"].get("load_format")
