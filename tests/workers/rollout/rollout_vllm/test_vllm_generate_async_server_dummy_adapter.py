@@ -38,7 +38,7 @@ from verl.workers.rollout.vllm_rollout.vllm_async_server import vLLMHttpServer
 from verl.workers.rollout.vllm_rollout.vllm_rollout import ServerAdapter as vLLMServerAdapter
 
 MODEL_PATH = Path(os.path.expanduser(os.environ.get("VERL_TEST_VLLM_MODEL_PATH", "~/models/Qwen/Qwen2.5-0.5B-Instruct")))
-a="2216lqc"
+a="2226lqc"
 
 class AdapterAwareServerAdapter(vLLMServerAdapter):
     """Helper adapter that exposes an adapter-oriented update API."""
@@ -64,6 +64,11 @@ def _tokenize_prompt(text: str) -> list[int]:
     token_ids = normalize_token_ids(tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True))
     assert len(token_ids) > 0, "Prompt should produce at least one token."
     return token_ids
+
+
+def _decode_tokens(token_ids: list[int]) -> str:
+    tokenizer = AutoTokenizer.from_pretrained(str(MODEL_PATH), trust_remote_code=True)
+    return tokenizer.decode(token_ids, skip_special_tokens=True)
 
 
 @pytest.fixture
@@ -192,6 +197,42 @@ async def test_adapter_aware_update_weights_passes_peft_kwargs(monkeypatch):
     assert captured["global_steps"] == 12
     assert captured["kwargs"]["peft_config"] == dummy_peft_config
     assert captured["kwargs"]["base_sync_done"] is True
+
+
+@pytest.mark.asyncio
+async def test_generate_after_update_weights_print_output(init_server_dummy, monkeypatch):
+    server = init_server_dummy
+
+    async def fake_update_weights(self, weights, global_steps=None, **kwargs):
+        # Simulate a successful update and mark the server state.
+        if global_steps is not None:
+            ray.get(server.set_global_steps.remote(global_steps))
+
+    monkeypatch.setattr(vLLMServerAdapter, "update_weights", fake_update_weights)
+
+    adapter = object.__new__(AdapterAwareServerAdapter)
+    await adapter.update_adapter_weights(
+        weights=iter(()),
+        peft_config={"r": 8, "lora_alpha": 16},
+        global_steps=1,
+    )
+
+    prompt = "写一段关于昇腾的介绍"
+    prompt_ids = _tokenize_prompt(prompt)
+    output = ray.get(
+        server.generate.remote(
+            prompt_ids=prompt_ids,
+            sampling_params={"max_tokens": 96, "temperature": 0.7, "top_p": 0.9},
+            request_id=f"test_update_then_gen_{uuid4().hex[:8]}",
+        ),
+        timeout=300,
+    )
+
+    assert isinstance(output, TokenOutput)
+    assert len(output.token_ids) > 0
+    text = _decode_tokens(output.token_ids)
+    print(f"\n[Prompt] {prompt}\n[Generated] {text}\n")
+    assert text.strip() != ""
 
 
 if __name__ == "__main__":
