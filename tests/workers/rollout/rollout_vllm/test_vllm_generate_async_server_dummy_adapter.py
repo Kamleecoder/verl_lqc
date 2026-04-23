@@ -38,22 +38,7 @@ from verl.workers.rollout.vllm_rollout.vllm_async_server import vLLMHttpServer
 from verl.workers.rollout.vllm_rollout.vllm_rollout import ServerAdapter as vLLMServerAdapter
 
 MODEL_PATH = Path(os.path.expanduser(os.environ.get("VERL_TEST_VLLM_MODEL_PATH", "~/models/Qwen/Qwen2.5-0.5B-Instruct")))
-a="2207lqc"
-
-class DummyLoadFormatVLLMHttpServer(vLLMHttpServer):
-    """Test-only server variant that keeps load_format='dummy' in standalone mode."""
-
-    def __init__(self, *args, **kwargs):
-        requested_load_format = kwargs["config"].get("load_format")
-        super().__init__(*args, **kwargs)
-        if requested_load_format == "dummy":
-            self.config.load_format = "dummy"
-
-    async def launch_server(self, *args, **kwargs):
-        # Keep an explicit coroutine method on this subclass so Ray recognizes
-        # it as an async actor when max_concurrency is set.
-        return await super().launch_server(*args, **kwargs)
-
+a="2216lqc"
 
 class AdapterAwareServerAdapter(vLLMServerAdapter):
     """Helper adapter that exposes an adapter-oriented update API."""
@@ -137,7 +122,7 @@ def init_server_dummy():
         }
     )
 
-    ServerCls = ray.remote(DummyLoadFormatVLLMHttpServer)
+    ServerCls = ray.remote(vLLMHttpServer)
     server = ServerCls.options(
         runtime_env={
             "env_vars": {
@@ -157,6 +142,8 @@ def init_server_dummy():
         nnodes=1,
         cuda_visible_devices="0",
     )
+    # Keep dummy load_format for this test by mutating actor state before launch.
+    ray.get(server.__ray_call__.remote(lambda self: setattr(self.config, "load_format", "dummy")))
 
     ray.get(server.launch_server.remote())
     yield server
