@@ -9,11 +9,12 @@ import ray
 from omegaconf import OmegaConf
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from verl.utils.device import is_support_ipc
+from verl.utils.device import get_device_id, is_support_ipc
 from verl.utils.tokenizer import normalize_token_ids
 from verl.workers.rollout.replica import RolloutMode, TokenOutput
 from verl.workers.rollout.vllm_rollout.bucketed_weight_transfer import BucketedWeightSender
 from verl.workers.rollout.vllm_rollout.vllm_async_server import vLLMHttpServer
+from verl.workers.rollout.vllm_rollout.utils import get_device_uuid
 
 MODEL_PATH = Path(os.path.expanduser(os.environ.get("VERL_TEST_VLLM_MODEL_PATH", "~/models/Qwen/Qwen2.5-0.5B-Instruct")))
 
@@ -149,7 +150,8 @@ def _iter_reference_weights():
 
 
 def _real_update_dummy_server_weights(server):
-    zmq_handle = ray.get(server.collective_rpc.remote("_get_zmq_handle"))
+    device_uuid = get_device_uuid(get_device_id())
+    zmq_handle = f"ipc:///tmp/rl-colocate-zmq-{device_uuid}.sock"
     update_ref = server.collective_rpc.remote(
         "update_weights_from_ipc",
         kwargs={"use_shm": not is_support_ipc()},
