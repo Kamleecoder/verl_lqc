@@ -38,7 +38,7 @@ from verl.workers.rollout.vllm_rollout.vllm_async_server import vLLMHttpServer
 from verl.workers.rollout.vllm_rollout.vllm_rollout import ServerAdapter as vLLMServerAdapter
 
 MODEL_PATH = Path(os.path.expanduser(os.environ.get("VERL_TEST_VLLM_MODEL_PATH", "~/models/Qwen/Qwen2.5-0.5B-Instruct")))
-
+a="2207lqc"
 
 class DummyLoadFormatVLLMHttpServer(vLLMHttpServer):
     """Test-only server variant that keeps load_format='dummy' in standalone mode."""
@@ -146,7 +146,6 @@ def init_server_dummy():
                 "NCCL_CUMEM_ENABLE": "0",
             }
         },
-        max_concurrency=16,
     ).remote(
         config=rollout_cfg,
         model_config=model_cfg,
