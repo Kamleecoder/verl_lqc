@@ -125,6 +125,11 @@ def _generate_text(server, prompt: str, tag: str) -> str:
     return text
 
 
+def _stop_server(server):
+    if server is not None:
+        ray.kill(server)
+
+
 def test_compare_dummy_update_and_auto_outputs_same_prompt():
     if not MODEL_PATH.exists():
         pytest.skip(f"Model path does not exist: {MODEL_PATH}")
@@ -132,11 +137,17 @@ def test_compare_dummy_update_and_auto_outputs_same_prompt():
     prompt = "写一段关于昇腾的介绍"
     dummy_server = None
     auto_server = None
+    dummy_text = ""
+    auto_text = ""
     try:
         dummy_server = _start_server(load_format="dummy", force_dummy_after_init=True)
         # Simulate "after update_weights" state marker for comparison output.
         ray.get(dummy_server.set_global_steps.remote(1))
         dummy_text = _generate_text(dummy_server, prompt, "dummy_update")
+
+        # Release resources from dummy server before starting auto server.
+        _stop_server(dummy_server)
+        dummy_server = None
 
         auto_server = _start_server(load_format="auto", force_dummy_after_init=False)
         auto_text = _generate_text(auto_server, prompt, "auto")
@@ -146,9 +157,7 @@ def test_compare_dummy_update_and_auto_outputs_same_prompt():
             f"{prompt}\n[Generated][dummy+update] {dummy_text}\n[Generated][auto] {auto_text}\n"
         )
     finally:
-        if dummy_server is not None:
-            ray.kill(dummy_server)
-        if auto_server is not None:
-            ray.kill(auto_server)
+        _stop_server(dummy_server)
+        _stop_server(auto_server)
         if ray.is_initialized():
             ray.shutdown()
