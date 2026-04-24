@@ -18,6 +18,7 @@ from verl.workers.rollout.vllm_rollout.utils import get_device_uuid
 
 MODEL_PATH = Path(os.path.expanduser(os.environ.get("VERL_TEST_VLLM_MODEL_PATH", "~/models/Qwen/Qwen2.5-0.5B-Instruct")))
 
+# ASCEND_RT_VISIBLE_DEVICES=4 pytest tests/workers/rollout/rollout_vllm/test_server_adapter_compare_outputs.py -v -s
 
 def _tokenize_prompt(text: str) -> list[int]:
     tokenizer = AutoTokenizer.from_pretrained(str(MODEL_PATH), trust_remote_code=True)

@@ -18,6 +18,8 @@ from verl.workers.config import CheckpointEngineConfig, HFModelConfig
 
 MODEL_PATH = Path(os.path.expanduser(os.environ.get("VERL_TEST_VLLM_MODEL_PATH", "~/models/Qwen/Qwen2.5-0.5B-Instruct")))
 
+# ASCEND_RT_VISIBLE_DEVICES=4 pytest tests/workers/rollout/rollout_vllm/test_server_adapter_compare_outputs.py -v -s
+
 
 def _ray_runtime_env_vars() -> dict[str, str]:
     env: dict[str, str] = {
@@ -44,8 +46,12 @@ def _build_base_config(model_path: str) -> DictConfig:
     config.actor_rollout_ref.model.path = os.path.expanduser(model_path)
     config.actor_rollout_ref.rollout.name = "vllm"
     config.actor_rollout_ref.rollout.mode = "async"
+    config.actor_rollout_ref.rollout.tensor_model_parallel_size = 1
+    config.actor_rollout_ref.rollout.data_parallel_size = 1
+    config.actor_rollout_ref.rollout.pipeline_model_parallel_size = 1
     config.actor_rollout_ref.rollout.checkpoint_engine.backend = "nccl"
     config.actor_rollout_ref.rollout.nnodes = 1
+    config.actor_rollout_ref.rollout.n_gpus_per_node = 1
     config.trainer.nnodes = 1
     config.trainer.n_gpus_per_node = 1
     return config
