@@ -8,7 +8,7 @@ import torch
 from hydra import compose, initialize_config_dir
 from omegaconf import DictConfig, OmegaConf
 
-from tests.checkpoint_engine.test_utils import create_trainer_worker_group
+from tests.checkpoint_engine.test_utils import create_rollout_worker_group, create_trainer_worker_group
 from verl.checkpoint_engine import CheckpointEngineManager
 from verl.experimental.agent_loop.agent_loop import AgentLoopManager, AsyncLLMServerManager
 from verl.single_controller.ray import RayResourcePool
@@ -71,6 +71,22 @@ async def _run_once_collect_text(base_config: DictConfig, load_format: str, prom
         trainer_pool = RayResourcePool(process_on_nodes=[config.trainer.n_gpus_per_node], max_colocate_count=3)
         trainer = create_trainer_worker_group(trainer_pool, model_config, checkpoint_engine_config)
         trainer.reset()
+
+        # Resharding consistency check: run one checkpoint-engine update against a
+        # rollout mock that validates received tensors against HF reference weights.
+        rollout_mock, replicas_mock = await create_rollout_worker_group(
+            trainer_pool,
+            model_config,
+            omega_conf_to_dataclass(config.actor_rollout_ref.rollout),
+            check_allclose=True,
+        )
+        checkpoint_manager_mock = CheckpointEngineManager(
+            config=checkpoint_engine_config,
+            trainer=trainer,
+            replicas=replicas_mock,
+        )
+        await checkpoint_manager_mock.update_weights(global_steps=1)
+        rollout_mock.check_weights()
 
         agent_loop_manager = await AgentLoopManager.create(config=config)
         servers = list(
