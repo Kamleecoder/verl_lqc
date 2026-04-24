@@ -21,11 +21,73 @@ from transformers import AutoModelForCausalLM
 from verl.checkpoint_engine import CheckpointEngineRegistry, CheckpointEngineWorker
 from verl.single_controller.base.decorator import Dispatch, register
 from verl.single_controller.ray import RayClassWithInitArgs, RayResourcePool, RayWorkerGroup
-from verl.utils.device import get_device_name
+from verl.utils.device import get_device_name, is_torch_npu_available
 from verl.utils.fs import copy_to_local
 from verl.workers.config import CheckpointEngineConfig, FSDPEngineConfig, HFModelConfig, RolloutConfig
 from verl.workers.engine_workers import TrainingWorker, TrainingWorkerConfig
 from verl.workers.rollout import BaseRollout, RolloutReplica
+
+
+# Monkey-patch RayResourcePool.get_placement_groups to correctly handle NPU.
+# The upstream implementation always uses "GPU" as the resource key in bundles,
+# even when device_name="npu". On NPU-only clusters (no GPU resources registered
+# in Ray), this causes workers to be scheduled on wrong nodes and crash with
+# "IndexError: list index out of range" when Ray tries to map accelerator IDs.
+# Additionally, we auto-set accelerator_type="NPU" when torch_npu is available.
+def _patch_ray_resource_pool_for_npu():
+    """Patch RayResourcePool to correctly handle NPU device bundles."""
+    from ray.util.placement_group import placement_group
+    from verl.single_controller.ray.base import RayResourcePool as OriginalRRP, sort_placement_group_by_node_ip
+
+    if getattr(OriginalRRP, "_npu_patch_applied", False):
+        return
+
+    original_init = OriginalRRP.__init__
+
+    def patched_init(self, *args, accelerator_type=None, **kwargs):
+        original_init(self, *args, accelerator_type=accelerator_type, **kwargs)
+        if self.accelerator_type is None and is_torch_npu_available(check_device=False):
+            self.accelerator_type = "NPU"
+
+    def patched_get_placement_groups(self, strategy="STRICT_PACK", name=None, device_name="cuda"):
+        if self.pgs is not None:
+            return self.pgs
+
+        pg_name_prefix = (
+            name if name else f"{self.name_prefix}verl_group_{'_'.join([str(c) for c in self._store])}:"
+        )
+        if device_name == "npu":
+            ray_device_name = "NPU"
+        elif device_name == "cuda":
+            ray_device_name = "GPU"
+        else:
+            ray_device_name = device_name.upper()
+
+        bundle = {"CPU": self.max_colocate_count}
+        if self.use_gpu:
+            bundle[ray_device_name] = 1
+            if self.accelerator_type is not None:
+                bundle[self.accelerator_type] = 1e-4
+
+        pg_scheme = [[bundle.copy() for _ in range(process_count)] for process_count in self._store]
+        lifetime = "detached" if self.detached else None
+
+        pgs = [
+            placement_group(bundles=bundles, strategy=strategy, name=pg_name_prefix + str(idx), lifetime=lifetime)
+            for idx, bundles in enumerate(pg_scheme)
+        ]
+        ray.get([pg.ready() for pg in pgs])
+        self.pgs = sort_placement_group_by_node_ip(pgs)
+        return self.pgs
+
+    OriginalRRP.__init__ = patched_init
+    OriginalRRP.get_placement_groups = patched_get_placement_groups
+    OriginalRRP._npu_patch_applied = True
+
+
+# Apply the NPU patch immediately so any subsequent imports or test code
+# that creates RayResourcePool instances will use the fixed implementation.
+_patch_ray_resource_pool_for_npu()
 
 
 class TrainingWorkerTest(TrainingWorker):

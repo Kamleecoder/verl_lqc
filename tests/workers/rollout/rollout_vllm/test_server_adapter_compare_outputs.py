@@ -19,7 +19,12 @@ from verl.workers.config import CheckpointEngineConfig, HFModelConfig
 
 MODEL_PATH = Path(os.path.expanduser(os.environ.get("VERL_TEST_VLLM_MODEL_PATH", "~/models/Qwen/Qwen2.5-0.5B-Instruct")))
 
-# ASCEND_RT_VISIBLE_DEVICES=4,5 pytest tests/workers/rollout/rollout_vllm/test_server_adapter_compare_outputs.py -v -s
+# Before running on NPU, set the visible devices and the model path:
+#   ASCEND_RT_VISIBLE_DEVICES=4,5 VERL_TEST_VLLM_MODEL_PATH=~/models/Qwen/Qwen2.5-0.5B-Instruct \
+#     pytest tests/workers/rollout/rollout_vllm/test_server_adapter_compare_outputs.py -v -s
+#
+# The test creates 2 worker groups (trainer + rollout) and requires at least 2 NPU devices.
+# Each worker group gets placed on 1 device (tensor_model_parallel_size=1, data_parallel_size=1).
 
 
 def _ray_runtime_env_vars() -> dict[str, str]:
@@ -29,7 +34,14 @@ def _ray_runtime_env_vars() -> dict[str, str]:
         "VLLM_LOGGING_LEVEL": os.environ.get("VLLM_LOGGING_LEVEL", "INFO"),
     }
     if is_torch_npu_available():
-        env.setdefault("ASCEND_RT_VISIBLE_DEVICES", os.environ.get("ASCEND_RT_VISIBLE_DEVICES", "4,5"))
+        npu_devices = os.environ.get("ASCEND_RT_VISIBLE_DEVICES")
+        if npu_devices is None:
+            raise ValueError(
+                "When running on NPU, you must set ASCEND_RT_VISIBLE_DEVICES before running pytest. "
+                "Example: ASCEND_RT_VISIBLE_DEVICES=4,5 pytest tests/workers/rollout/rollout_vllm/"
+                "test_server_adapter_compare_outputs.py -v -s"
+            )
+        env["ASCEND_RT_VISIBLE_DEVICES"] = npu_devices
         env.setdefault("HCCL_CONNECT_TIMEOUT", "1500")
         env.setdefault("HCCL_HOST_SOCKET_PORT_RANGE", "60000-60050")
         env.setdefault("HCCL_NPU_SOCKET_PORT_RANGE", "61000-61050")
