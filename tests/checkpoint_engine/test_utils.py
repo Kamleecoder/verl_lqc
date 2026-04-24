@@ -89,6 +89,31 @@ def _patch_ray_resource_pool_for_npu():
     OriginalRRP._npu_patch_applied = True
 
 
+# Monkey-patch ResourcePoolManager._check_resource_available to correctly
+# detect NPU resources. The upstream implementation only checks "GPU" keys,
+# which returns 0 on NPU-only clusters (no GPU resources registered in Ray).
+from verl.single_controller.ray.base import ResourcePoolManager as OriginalRPM
+
+if not hasattr(OriginalRPM, "_npu_check_patch_applied"):
+
+    def patched_check(self):
+        node_available_resources = ray._private.state.available_resources_per_node()
+        node_available_accels = {
+            node: node_info.get("GPU", 0) if "GPU" in node_info else node_info.get("NPU", 0)
+            for node, node_info in node_available_resources.items()
+        }
+        total_available = sum(node_available_accels.values())
+        total_required = sum(n_gpus for process_on_nodes in self.resource_pool_spec.values() for n_gpus in process_on_nodes)
+        if total_available < total_required:
+            raise ValueError(
+                f"Total available accelerators {total_available} is less than total desired {total_required}. "
+                f"Per-node availability: {node_available_accels}"
+            )
+
+    OriginalRPM._check_resource_available = patched_check
+    OriginalRPM._npu_check_patch_applied = True
+
+
 # Apply the NPU patch immediately so any subsequent imports or test code
 # that creates RayResourcePool instances will use the fixed implementation.
 _patch_ray_resource_pool_for_npu()
