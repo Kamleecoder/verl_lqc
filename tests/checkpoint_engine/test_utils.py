@@ -33,7 +33,6 @@ from verl.workers.rollout import BaseRollout, RolloutReplica
 # even when device_name="npu". On NPU-only clusters (no GPU resources registered
 # in Ray), this causes workers to be scheduled on wrong nodes and crash with
 # "IndexError: list index out of range" when Ray tries to map accelerator IDs.
-# Additionally, we auto-set accelerator_type="NPU" when torch_npu is available.
 def _patch_ray_resource_pool_for_npu():
     """Patch RayResourcePool to correctly handle NPU device bundles."""
     from ray.util.placement_group import placement_group
@@ -66,7 +65,12 @@ def _patch_ray_resource_pool_for_npu():
         bundle = {"CPU": self.max_colocate_count}
         if self.use_gpu:
             bundle[ray_device_name] = 1
-            if self.accelerator_type is not None:
+            # Only add accelerator_type as a marker when it differs from the
+            # device name. When device_name="npu", ray_device_name is already
+            # "NPU" and accelerator_type is also "NPU"; adding it again would
+            # overwrite the correct "NPU": 1 with "NPU": 1e-4, breaking the
+            # placement group (e.g. num_gpus=0.333 < 0.0001 won't fit).
+            if self.accelerator_type is not None and self.accelerator_type != ray_device_name:
                 bundle[self.accelerator_type] = 1e-4
 
         pg_scheme = [[bundle.copy() for _ in range(process_count)] for process_count in self._store]
