@@ -134,9 +134,6 @@ async def _run_once_collect_text(base_config: DictConfig, load_format: str, prom
             load_balancer_handle=agent_loop_manager.global_load_balancer,
         )
 
-        # Real weight sync through verl's checkpoint engine + vLLM async ServerAdapter path.
-        await checkpoint_manager.update_weights(global_steps=1)
-
         prompt_ids = model_config.tokenizer.apply_chat_template(
             [{"role": "user", "content": prompt}],
             add_generation_prompt=True,
