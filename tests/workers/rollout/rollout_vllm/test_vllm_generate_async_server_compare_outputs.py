@@ -17,8 +17,8 @@ from verl.workers.rollout.vllm_rollout.utils import get_device_uuid
 
 MODEL_PATH = "/data02/Moonlight-16B-A3B"
 
-# Test with Moonlight-16B-A3B from ModelScope using graph mode (enforce_eager=False)
-# ASCEND_RT_VISIBLE_DEVICES=4 pytest tests/workers/rollout/rollout_vllm/test_server_adapter_compare_outputs.py -v -s
+# Test with Moonlight-16B-A3B using graph mode + MLA
+# ASCEND_RT_VISIBLE_DEVICES=0 pytest tests/workers/rollout/rollout_vllm/test_vllm_generate_async_server_compare_outputs.py -v -s
 
 def _tokenize_prompt(text: str) -> list[int]:
     tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, trust_remote_code=True)
@@ -59,6 +59,13 @@ def _build_configs(load_format: str):
             "top_k": -1,
             "top_p": 1.0,
             "temperature": 0.0,
+            "engine_kwargs": {
+                "vllm": {
+                    "additional_config": {
+                        "enable_kv_nz": True,
+                    },
+                }
+            },
         }
     )
     model_cfg = OmegaConf.create(
