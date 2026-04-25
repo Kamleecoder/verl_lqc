@@ -1,7 +1,6 @@
 import asyncio
 import gc
 import os
-from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -16,12 +15,13 @@ from verl.workers.rollout.vllm_rollout.bucketed_weight_transfer import BucketedW
 from verl.workers.rollout.vllm_rollout.vllm_async_server import vLLMHttpServer
 from verl.workers.rollout.vllm_rollout.utils import get_device_uuid
 
-MODEL_PATH = Path(os.path.expanduser(os.environ.get("VERL_TEST_VLLM_MODEL_PATH", "~/models/Qwen/Qwen2.5-0.5B-Instruct")))
+MODEL_PATH = "/data02/Moonlight-16B-A3B"
 
+# Test with Moonlight-16B-A3B from ModelScope using graph mode (enforce_eager=False)
 # ASCEND_RT_VISIBLE_DEVICES=4 pytest tests/workers/rollout/rollout_vllm/test_server_adapter_compare_outputs.py -v -s
 
 def _tokenize_prompt(text: str) -> list[int]:
-    tokenizer = AutoTokenizer.from_pretrained(str(MODEL_PATH), trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, trust_remote_code=True)
     messages = [{"role": "user", "content": text}]
     token_ids = normalize_token_ids(tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True))
     assert len(token_ids) > 0, "Prompt should produce at least one token."
@@ -29,7 +29,7 @@ def _tokenize_prompt(text: str) -> list[int]:
 
 
 def _decode_tokens(token_ids: list[int]) -> str:
-    tokenizer = AutoTokenizer.from_pretrained(str(MODEL_PATH), trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH, trust_remote_code=True)
     return tokenizer.decode(token_ids, skip_special_tokens=True)
 
 
@@ -42,20 +42,20 @@ def _build_configs(load_format: str):
             "tensor_model_parallel_size": 1,
             "data_parallel_size": 1,
             "pipeline_model_parallel_size": 1,
-            "gpu_memory_utilization": 0.8,
-            "max_num_batched_tokens": 4096,
-            "max_num_seqs": 128,
-            "max_model_len": 2048,
+            "gpu_memory_utilization": 0.85,
+            "max_num_batched_tokens": 8192,
+            "max_num_seqs": 64,
+            "max_model_len": 4096,
             "dtype": "bfloat16",
             "load_format": load_format,
-            "enforce_eager": True,
+            "enforce_eager": False,
             "enable_chunked_prefill": False,
             "enable_prefix_caching": False,
             "enable_sleep_mode": False,
             "free_cache_engine": True,
             "disable_log_stats": True,
-            "prompt_length": 1024,
-            "response_length": 128,
+            "prompt_length": 512,
+            "response_length": 256,
             "top_k": -1,
             "top_p": 1.0,
             "temperature": 0.0,
@@ -64,7 +64,7 @@ def _build_configs(load_format: str):
     model_cfg = OmegaConf.create(
         {
             "_target_": "verl.workers.config.HFModelConfig",
-            "path": str(MODEL_PATH),
+            "path": MODEL_PATH,
             "trust_remote_code": True,
             "load_tokenizer": True,
         }
@@ -138,7 +138,7 @@ def _stop_server(server):
 
 def _iter_reference_weights():
     model = AutoModelForCausalLM.from_pretrained(
-        str(MODEL_PATH),
+        MODEL_PATH,
         trust_remote_code=True,
         torch_dtype="auto",
     )
@@ -167,9 +167,6 @@ def _real_update_dummy_server_weights(server):
 
 
 def test_compare_dummy_update_and_auto_outputs_same_prompt():
-    if not MODEL_PATH.exists():
-        pytest.skip(f"Model path does not exist: {MODEL_PATH}")
-
     prompt = "写一段关于昇腾的介绍"
     dummy_server = None
     auto_server = None
