@@ -17,7 +17,7 @@ from verl.workers.rollout.vllm_rollout.utils import get_device_uuid
 
 MODEL_PATH = "/data02/Moonlight-16B-A3B"
 
-# Test with Moonlight-16B-A3B using graph mode + MLA
+# Test with Moonlight-16B-A3B using graph mode (npugraph_ex) + MLA
 # ASCEND_RT_VISIBLE_DEVICES=0 pytest tests/workers/rollout/rollout_vllm/test_vllm_generate_async_server_compare_outputs.py -v -s
 
 def _tokenize_prompt(text: str) -> list[int]:
@@ -62,7 +62,9 @@ def _build_configs(load_format: str):
             "engine_kwargs": {
                 "vllm": {
                     "additional_config": {
-                        "enable_kv_nz": True,
+                        "ascend_compilation_config": {
+                            "enable_npugraph_ex": True,
+                        },
                     },
                 }
             },
