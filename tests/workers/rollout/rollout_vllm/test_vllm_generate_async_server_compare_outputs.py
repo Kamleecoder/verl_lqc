@@ -159,7 +159,7 @@ def _real_update_dummy_server_weights(server):
     )
     sender = BucketedWeightSender(
         zmq_handle=zmq_handle,
-        bucket_size_mb=512,
+        bucket_size_mb=1024,
         use_shm=not is_support_ipc(),
     )
     asyncio.run(sender.async_send_weights(_iter_reference_weights()))
