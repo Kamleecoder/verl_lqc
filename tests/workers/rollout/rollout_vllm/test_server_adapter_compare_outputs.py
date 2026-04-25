@@ -125,9 +125,6 @@ async def _run_once_collect_text(base_config: DictConfig, load_format: str, prom
                 strict=True,
             )
         )
-        checkpoint_manager = CheckpointEngineManager(
-            config=checkpoint_engine_config, trainer=trainer, replicas=agent_loop_manager.rollout_replicas
-        )
         server_manager = AsyncLLMServerManager(
             config=config,
             servers=servers,
