@@ -84,7 +84,7 @@ def _build_configs(load_format: str, num_gpus: int = 4):
     return rollout_cfg, model_cfg
 
 
-def _start_server(load_format: str, force_dummy_after_init: bool = False, num_gpus: int = 4):
+def _start_server(load_format: str, force_dummy_after_init: bool = False, num_npus: int = 4):
     runtime_env_vars = {
         "TOKENIZERS_PARALLELISM": "true",
         "VERL_LOGGING_LEVEL": "INFO",
@@ -96,10 +96,10 @@ def _start_server(load_format: str, force_dummy_after_init: bool = False, num_gp
     if not ray.is_initialized():
         ray.init(runtime_env={"env_vars": runtime_env_vars}, ignore_reinit_error=True)
 
-    rollout_cfg, model_cfg = _build_configs(load_format=load_format, num_gpus=num_gpus)
+    rollout_cfg, model_cfg = _build_configs(load_format=load_format, num_gpus=num_npus)
 
-    cuda_visible_devices = ",".join(str(i) for i in range(num_gpus))
-    ray_devices = ",".join(str(i) for i in range(num_gpus))
+    cuda_visible_devices = ",".join(str(i) for i in range(num_npus))
+    ray_devices = ",".join(str(i) for i in range(num_npus))
 
     server = ray.remote(vLLMHttpServer).options(
         runtime_env={
@@ -109,7 +109,6 @@ def _start_server(load_format: str, force_dummy_after_init: bool = False, num_gp
                 "NCCL_CUMEM_ENABLE": "0",
             }
         },
-        num_gpus=num_gpus,
         max_concurrency=16,
     ).remote(
         config=rollout_cfg,
@@ -118,7 +117,7 @@ def _start_server(load_format: str, force_dummy_after_init: bool = False, num_gp
         workers=[],
         replica_rank=0,
         node_rank=0,
-        gpus_per_node=num_gpus,
+        gpus_per_node=num_npus,
         nnodes=1,
         cuda_visible_devices=cuda_visible_devices,
     )
@@ -186,14 +185,14 @@ def _real_update_dummy_server_weights(server):
 def test_compare_dummy_update_and_auto_outputs_same_prompt_ep():
     """Test with Moonlight-16B-A3B using Pure EP (no TP, only Expert Parallelism)"""
     prompt = "写一段关于昇腾的介绍"
-    num_gpus = 4  # Use 4 GPUs for EP
+    num_npus = 4  # Use 4 NPUs for EP
 
     dummy_server = None
     auto_server = None
     dummy_text = ""
     auto_text = ""
     try:
-        dummy_server = _start_server(load_format="dummy", force_dummy_after_init=True, num_gpus=num_gpus)
+        dummy_server = _start_server(load_format="dummy", force_dummy_after_init=True, num_npus=num_npus)
         # Do real base-weight sync to make dummy comparable with auto.
         _real_update_dummy_server_weights(dummy_server)
         ray.get(dummy_server.set_global_steps.remote(1))
@@ -203,7 +202,7 @@ def test_compare_dummy_update_and_auto_outputs_same_prompt_ep():
         _stop_server(dummy_server)
         dummy_server = None
 
-        auto_server = _start_server(load_format="auto", force_dummy_after_init=False, num_gpus=num_gpus)
+        auto_server = _start_server(load_format="auto", force_dummy_after_init=False, num_npus=num_npus)
         auto_text = _generate_text(auto_server, prompt, "auto")
 
         print(
