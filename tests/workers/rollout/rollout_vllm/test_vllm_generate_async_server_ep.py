@@ -109,6 +109,7 @@ def _start_server(load_format: str, force_dummy_after_init: bool = False, num_gp
                 "NCCL_CUMEM_ENABLE": "0",
             }
         },
+        num_gpus=num_gpus,
         max_concurrency=16,
     ).remote(
         config=rollout_cfg,
