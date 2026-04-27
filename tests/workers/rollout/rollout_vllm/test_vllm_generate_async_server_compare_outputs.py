@@ -1,6 +1,7 @@
 import asyncio
 import gc
 import os
+import time
 from uuid import uuid4
 
 import pytest
@@ -151,6 +152,11 @@ def _generate(server, prompt: str, tag: str, model_path: str) -> str:
     return text
 
 
+def _clear_npu_memory():
+    gc.collect()
+    time.sleep(2)
+
+
 def _run_compare_test(model_path: str, enable_npugraph_ex: bool, prompt: str, model_name: str):
     dummy_server = None
     auto_server = None
@@ -162,6 +168,7 @@ def _run_compare_test(model_path: str, enable_npugraph_ex: bool, prompt: str, mo
 
         ray.kill(dummy_server)
         dummy_server = None
+        _clear_npu_memory()
 
         auto_server = _start_server("auto", model_path, enable_npugraph_ex, force_dummy=False)
         auto_text = _generate(auto_server, prompt, "auto", model_path)

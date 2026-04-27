@@ -1,6 +1,7 @@
 import asyncio
 import gc
 import os
+import time
 from uuid import uuid4
 
 import pytest
@@ -15,8 +16,8 @@ from verl.workers.rollout.vllm_rollout.bucketed_weight_transfer import BucketedW
 from verl.workers.rollout.vllm_rollout.utils import get_device_uuid
 from verl.workers.rollout.vllm_rollout.vllm_async_server import vLLMHttpServer
 
-MODEL_PATH = "/data02/Moonlight-16B-A3B"
-MODEL_PATH_QWEN3_14B = "/data02/Qwen3-14B"
+MODEL_PATH = "/data02/Moonlight-16B-A3B-Instruct"
+MODEL_PATH_QWEN3_14B = "/data02/Qwen3/Qwen3-14B"
 
 # Test with Moonlight-16B-A3B using graph mode (npugraph_ex) + MLA
 # ASCEND_RT_VISIBLE_DEVICES=0 pytest tests/workers/rollout/rollout_vllm/test_vllm_generate_async_server_compare_outputs.py -v -s
@@ -151,6 +152,11 @@ def _generate(server, prompt: str, tag: str, model_path: str) -> str:
     return text
 
 
+def _clear_npu_memory():
+    gc.collect()
+    time.sleep(2)
+
+
 def _run_compare_test(model_path: str, enable_npugraph_ex: bool, prompt: str, model_name: str):
     dummy_server = None
     auto_server = None
@@ -162,6 +168,7 @@ def _run_compare_test(model_path: str, enable_npugraph_ex: bool, prompt: str, mo
 
         ray.kill(dummy_server)
         dummy_server = None
+        _clear_npu_memory()
 
         auto_server = _start_server("auto", model_path, enable_npugraph_ex, force_dummy=False)
         auto_text = _generate(auto_server, prompt, "auto", model_path)
@@ -176,12 +183,14 @@ def _run_compare_test(model_path: str, enable_npugraph_ex: bool, prompt: str, mo
         if ray.is_initialized():
             ray.shutdown()
 
+def test_compare_dummy_update_and_auto_outputs_same_prompt_qwen3_14b():
+    """Test non-ACL graph mode with Qwen3-14B model."""
+    _run_compare_test(MODEL_PATH_QWEN3_14B, enable_npugraph_ex=False, prompt="写一段关于人工智能的介绍", model_name="Qwen3-14B")
+
+
 
 def test_compare_dummy_update_and_auto_outputs_same_prompt():
     """Test ACL graph mode (npugraph_ex) with Moonlight-16B-A3B model."""
     _run_compare_test(MODEL_PATH, enable_npugraph_ex=True, prompt="写一段关于昇腾的介绍", model_name="Moonlight-16B-A3B")
 
 
-def test_compare_dummy_update_and_auto_outputs_same_prompt_qwen3_14b():
-    """Test non-ACL graph mode with Qwen3-14B model."""
-    _run_compare_test(MODEL_PATH_QWEN3_14B, enable_npugraph_ex=False, prompt="写一段关于人工智能的介绍", model_name="Qwen3-14B")
