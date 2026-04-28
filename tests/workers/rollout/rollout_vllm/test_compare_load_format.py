@@ -19,13 +19,6 @@ from verl.workers.rollout.vllm_rollout.vllm_async_server import vLLMHttpServer
 MODEL_PATH = "/data02/Moonlight-16B-A3B-Instruct"
 MODEL_PATH_QWEN3_14B = "/data02/Qwen3/Qwen3-14B"
 
-# Test with Moonlight-16B-A3B using graph mode (npugraph_ex) + MLA
-# ASCEND_RT_VISIBLE_DEVICES=0 pytest tests/workers/rollout/rollout_vllm/test_vllm_generate_async_server_compare_outputs.py -v -s
-
-# Test with Qwen3-14B without ACL graph
-# ASCEND_RT_VISIBLE_DEVICES=0 pytest tests/workers/rollout/rollout_vllm/test_vllm_generate_async_server_compare_outputs.py::test_compare_dummy_update_and_auto_outputs_same_prompt_qwen3_14b -v -s
-
-
 def _build_config(load_format: str, model_path: str, enable_npugraph_ex: bool = True):
     rollout_cfg = OmegaConf.create(
         {
@@ -183,14 +176,12 @@ def _run_compare_test(model_path: str, enable_npugraph_ex: bool, prompt: str, mo
         if ray.is_initialized():
             ray.shutdown()
 
+
 def test_compare_dummy_update_and_auto_outputs_same_prompt_qwen3_14b():
     """Test non-ACL graph mode with Qwen3-14B model."""
     _run_compare_test(MODEL_PATH_QWEN3_14B, enable_npugraph_ex=False, prompt="写一段关于人工智能的介绍", model_name="Qwen3-14B")
 
 
-
 def test_compare_dummy_update_and_auto_outputs_same_prompt():
     """Test ACL graph mode (npugraph_ex) with Moonlight-16B-A3B model."""
     _run_compare_test(MODEL_PATH, enable_npugraph_ex=True, prompt="写一段关于昇腾的介绍", model_name="Moonlight-16B-A3B")
-
-
