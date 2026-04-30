@@ -134,7 +134,7 @@ def _generate(server, prompt: str, tag: str, model_path: str) -> str:
     output = ray.get(
         server.generate.remote(
             prompt_ids=prompt_ids,
-            sampling_params={"max_tokens": 96, "temperature": 0.0, "top_p": 1.0, "top_k": -1},
+            sampling_params={"max_tokens": 4096, "temperature": 0.0, "top_p": 1.0, "top_k": -1},
             request_id=f"test_{tag}_{uuid4().hex[:8]}",
         ),
         timeout=300,
